@@ -2,9 +2,10 @@ use crate::module::Module;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
+use crate::module::ModuleSource::NextCloud;
 
 /// Deals with the NextCloud API, gathers data, and filters out the relevant parts.
-pub struct NextCloud {
+pub struct NextCloudReader {
     client: Client,
     username: String,
     password: String,
@@ -182,7 +183,7 @@ struct Tile {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Public Functions
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-impl NextCloud {
+impl NextCloudReader {
     /// Creates a new NextCloud connection.
     pub fn new(username: String, password: String) -> anyhow::Result<Self> {
         let client = Client::builder().cookie_store(true).build()?;
@@ -202,14 +203,21 @@ impl NextCloud {
         let columns = self.get_columns()?;
         let rows = self.get_rows(&columns)?;
 
-        Self::combine_columns_and_rows(&columns, &rows)
+        let mut modules = Self::combine_columns_and_rows(&columns, &rows)?;
+        modules.sort();
+        
+        for module in &mut modules {
+           module.canonicalize(); 
+        }
+        
+        Ok(modules)
     }
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Private Functions
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-impl NextCloud {
+impl NextCloudReader {
     /// This gets all columns from the NextCloud API and then filters them.
     /// It only returns the columns that start with "Verwendbarkeit".
     fn get_columns(&self) -> anyhow::Result<Vec<Column>> {
@@ -266,7 +274,12 @@ impl NextCloud {
         // Loop over all rows, where each row is one module like `EinfInf`.
         for row in rows {
             // Create the module which we will fill with correct data during the next loop.
-            let mut module = Module::default();
+            let mut module = Module {
+                title: "".into(),
+                usabilities: vec![],
+                module_type: "".into(),
+                module_source: NextCloud,
+            };
 
             // Loop over each tile in the row.
             for tile in &row.tiles {
