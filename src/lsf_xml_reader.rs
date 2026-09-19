@@ -1,14 +1,10 @@
-use crate::module::Module;
+use crate::lsf_module::LsfModule;
 use anyhow::bail;
-use quick_xml::Reader;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter, Write, format};
+use std::fmt::Write;
+use std::fmt::{Debug, Formatter};
 use std::fs;
-use std::fs::File;
-use std::io::BufReader;
-use std::ptr::hash;
-use crate::module::ModuleSource::Lsf;
 
 pub struct LsfXmlReader {
     xml: String,
@@ -55,10 +51,10 @@ struct TreeRoot {
 
 impl Debug for TreeRoot {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut str: String = "".into();
+        let mut str: String = String::new();
 
         for node in &self.tree_nodes {
-            str.push_str(&format!("{:?}\n\n", node))
+            let _ = write!(str, "{node:?}\n\n");
         }
 
         f.write_str(&str)
@@ -70,7 +66,7 @@ impl Debug for TreeRoot {
 struct TreeNode {
     #[serde(rename = "Vorlesung")]
     #[serde(default)]
-    children: Vec<TreeNode>,
+    children: Vec<Self>,
 
     #[serde(rename = "@ueebene")]
     depths: u8,
@@ -81,16 +77,16 @@ struct TreeNode {
 
 impl Debug for TreeNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut str: String = "".into();
+        let mut str: String = String::new();
 
         for _ in 2..self.depths {
             str.push('\t');
         }
 
-        str.push_str(&format!("{:?} - {:?}\n", self.depths, self.content));
+        let _ = write!(str, "{:?} - {:?}\n", self.depths, self.content);
 
         for child in &self.children {
-            str.push_str(&format!("{:?}", child));
+            let _ = write!(str, "{child:?}");
         }
 
         f.write_str(&str)
@@ -117,7 +113,7 @@ impl Debug for NodeContent {
         }
 
         for class in &self.classes {
-            str.push_str(&format!("{class:?}, "));
+            let _ = write!(str, "{class:?}");
         }
 
         if !self.classes.is_empty() {
@@ -153,7 +149,7 @@ impl LsfXmlReader {
         Ok(Self { xml })
     }
 
-    pub fn get_lsf_lies(&self) -> anyhow::Result<Vec<Module>> {
+    pub fn get_lsf_lies(&self) -> anyhow::Result<Vec<LsfModule>> {
         let mut xml: Document = quick_xml::de::from_str(self.xml.as_str())?;
 
         // Remove irrelevant sections of the xml file.
@@ -171,19 +167,15 @@ impl LsfXmlReader {
         // Useful for debugging the xml parsing.
         // println!("{root_node:?}");
 
-        let mut hash_map: HashMap<Class, Module> = HashMap::new();
+        let mut hash_map: HashMap<Class, LsfModule> = HashMap::new();
 
         // Loop over all "tree_nodes" where each "tree_node" is a "Vorlesung" like this:
         for node in &root_node.children {
-            self.traverse_study_course_tree(&mut hash_map, &node.content.title, node, "".into());
+            Self::traverse_study_course_tree(&mut hash_map, &node.content.title, node, &mut vec![]);
         }
 
-        let mut modules: Vec<Module> = hash_map.into_iter().map(|tuple| tuple.1).collect();
+        let mut modules: Vec<LsfModule> = hash_map.into_iter().map(|tuple| tuple.1).collect();
         modules.sort();
-
-        for module in &mut modules {
-            module.canonicalize();
-        }
 
         Ok(modules)
     }
@@ -194,51 +186,40 @@ impl LsfXmlReader {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 impl LsfXmlReader {
     fn traverse_study_course_tree(
-        &self,
-        hash_map: &mut HashMap<Class, Module>,
+        class_to_module: &mut HashMap<Class, LsfModule>,
         course_of_study: &str,
         current_node: &TreeNode,
-        applicability: String,
+        verwendbarkeit_stack: &mut Vec<String>,
     ) {
         // First, step depth-first through the tree.
         // The current applicability has to be updated at each step.
         for node in &current_node.children {
-            let mut next_applicability = applicability.clone();
-            next_applicability.push_str(&format!(" {}", node.content.title.as_str()));
+            verwendbarkeit_stack.push(node.content.title.clone());
             // println!("{course_of_study} {next_applicability}");
-            self.traverse_study_course_tree(hash_map, course_of_study, &node, next_applicability);
+            Self::traverse_study_course_tree(
+                class_to_module,
+                course_of_study,
+                &node,
+                verwendbarkeit_stack,
+            );
+            let _ = verwendbarkeit_stack.pop();
         }
 
         // Then, go over the list of classes applicable for the current node.
         for class in &current_node.content.classes {
-            // If this is the first time we are encountering this class, create it.
-            if !hash_map.contains_key(class) {
-                let module = Module {
-                    title: class.title.clone(),
-                    usabilities: vec![],
-                    module_type: class.class_type.clone(),
-                    module_source: Lsf,
-                };
-                hash_map.insert(class.clone(), module);
-            }
-            // Then get it.
-            let module = hash_map.get_mut(class).unwrap();
+            // Either get or create the module.
+            let module = class_to_module.entry(class.clone()).or_insert(LsfModule {
+                title: class.title.clone(),
+                verwendbarkeiten_pro_studiengang: HashMap::new(),
+                module_type: class.class_type.clone(),
+            });
 
             // If this is the first time we are encountering this course of study for this class, create it.
-            let matching_index = Self::get_matching_usability_entry(&mut module.usabilities, course_of_study);
-            module.usabilities[matching_index].1.push(applicability.clone());
+            let verwendbarkeiten = module
+                .verwendbarkeiten_pro_studiengang
+                .entry(course_of_study.to_string())
+                .or_insert(vec![]);
+            verwendbarkeiten.push(verwendbarkeit_stack.clone());
         }
-    }
-
-    fn get_matching_usability_entry(usabilities: &mut Vec<(String, Vec<String>)>, course_of_study: &str) -> usize {
-        for index in 0..usabilities.len() {
-            if usabilities[index].0 == course_of_study {
-                return index;
-            }
-        }
-
-        usabilities.push((course_of_study.to_string(), vec![]));
-
-        usabilities.len() - 1
     }
 }

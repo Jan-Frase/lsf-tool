@@ -1,8 +1,7 @@
-use crate::module::Module;
+use crate::next_cloud_module::{ApplicabilityPerCourseOfStudy, Module};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
-use crate::module::ModuleSource::NextCloud;
 
 /// Deals with the NextCloud API, gathers data, and filters out the relevant parts.
 pub struct NextCloudReader {
@@ -205,11 +204,7 @@ impl NextCloudReader {
 
         let mut modules = Self::combine_columns_and_rows(&columns, &rows)?;
         modules.sort();
-        
-        for module in &mut modules {
-           module.canonicalize(); 
-        }
-        
+
         Ok(modules)
     }
 }
@@ -277,8 +272,6 @@ impl NextCloudReader {
             let mut module = Module {
                 title: "".into(),
                 usabilities: vec![],
-                module_type: "".into(),
-                module_source: NextCloud,
             };
 
             // Loop over each tile in the row.
@@ -392,9 +385,12 @@ impl NextCloudReader {
             // }
         }
 
-        module
-            .usabilities
-            .push((column.title.clone(), applicable_module_type_names));
+        let applics = ApplicabilityPerCourseOfStudy {
+            course_name: column.title.clone(),
+            applicabilites: applicable_module_type_names,
+        };
+
+        module.usabilities.push(applics);
 
         Ok(())
     }
