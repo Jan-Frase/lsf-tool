@@ -1,10 +1,10 @@
-use crate::lsf_module::LsfModule;
 use anyhow::bail;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fmt::{Debug, Formatter};
 use std::fs;
+use crate::module::{Module, Verwendbarkeiten};
 
 pub struct LsfXmlReader {
     xml: String,
@@ -149,7 +149,7 @@ impl LsfXmlReader {
         Ok(Self { xml })
     }
 
-    pub fn get_lsf_lies(&self) -> anyhow::Result<Vec<LsfModule>> {
+    pub fn get_lsf_lies(&self) -> anyhow::Result<Vec<Module>> {
         let mut xml: Document = quick_xml::de::from_str(self.xml.as_str())?;
 
         // Remove irrelevant sections of the xml file.
@@ -164,17 +164,14 @@ impl LsfXmlReader {
         // Unwrapping is safe here due to the previous check.
         let root_node = xml.document_core.tree_root.tree_nodes.pop().unwrap();
 
-        // Useful for debugging the xml parsing.
-        // println!("{root_node:?}");
-
-        let mut hash_map: HashMap<Class, LsfModule> = HashMap::new();
+        let mut hash_map: HashMap<Class, Module> = HashMap::new();
 
         // Loop over all "tree_nodes" where each "tree_node" is a "Vorlesung" like this:
         for node in &root_node.children {
             Self::traverse_study_course_tree(&mut hash_map, &node.content.title, node, &mut vec![]);
         }
 
-        let mut modules: Vec<LsfModule> = hash_map.into_iter().map(|tuple| tuple.1).collect();
+        let mut modules: Vec<Module> = hash_map.into_iter().map(|tuple| tuple.1).collect();
         modules.sort();
 
         Ok(modules)
@@ -186,7 +183,7 @@ impl LsfXmlReader {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 impl LsfXmlReader {
     fn traverse_study_course_tree(
-        class_to_module: &mut HashMap<Class, LsfModule>,
+        class_to_module: &mut HashMap<Class, Module>,
         course_of_study: &str,
         current_node: &TreeNode,
         verwendbarkeit_stack: &mut Vec<String>,
@@ -208,18 +205,18 @@ impl LsfXmlReader {
         // Then, go over the list of classes applicable for the current node.
         for class in &current_node.content.classes {
             // Either get or create the module.
-            let module = class_to_module.entry(class.clone()).or_insert(LsfModule {
+            let module = class_to_module.entry(class.clone()).or_insert(Module {
                 title: class.title.clone(),
-                verwendbarkeiten_pro_studiengang: HashMap::new(),
-                module_type: class.class_type.clone(),
+                verwendbarkeiten_map: HashMap::new(),
+                module_type: Some(class.class_type.clone()),
             });
 
             // If this is the first time we are encountering this course of study for this class, create it.
             let verwendbarkeiten = module
-                .verwendbarkeiten_pro_studiengang
+                .verwendbarkeiten_map
                 .entry(course_of_study.to_string())
-                .or_insert(vec![]);
-            verwendbarkeiten.push(verwendbarkeit_stack.clone());
+                .or_insert(Verwendbarkeiten {verwendbarkeiten: vec![]});
+            verwendbarkeiten.verwendbarkeiten.push(verwendbarkeit_stack.join(" → "));
         }
     }
 }

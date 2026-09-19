@@ -1,4 +1,5 @@
-use crate::next_cloud_module::{ApplicabilityPerCourseOfStudy, Module};
+use std::collections::HashMap;
+use crate::module::{Verwendbarkeiten, Module};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -271,7 +272,8 @@ impl NextCloudReader {
             // Create the module which we will fill with correct data during the next loop.
             let mut module = Module {
                 title: "".into(),
-                usabilities: vec![],
+                verwendbarkeiten_map: HashMap::new(),
+                module_type: None,
             };
 
             // Loop over each tile in the row.
@@ -385,12 +387,11 @@ impl NextCloudReader {
             // }
         }
 
-        let applics = ApplicabilityPerCourseOfStudy {
-            course_name: column.title.clone(),
-            applicabilites: applicable_module_type_names,
+        let applics = Verwendbarkeiten {
+            verwendbarkeiten: applicable_module_type_names,
         };
 
-        module.usabilities.push(applics);
+        module.verwendbarkeiten_map.insert(column.title.clone(), applics);
 
         Ok(())
     }

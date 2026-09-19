@@ -4,9 +4,8 @@ use crate::next_cloud_reader::NextCloudReader;
 use anyhow::Context;
 
 mod comparer;
-mod lsf_module;
 mod lsf_xml_reader;
-mod next_cloud_module;
+mod module;
 mod next_cloud_reader;
 
 const PATH_TO_LSF_EXPORT: &str = "/home/jan/Downloads/Vorlesungsverzeichnis_SoSe2026.xml";

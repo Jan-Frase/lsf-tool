@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
+use std::collections::HashMap;
 
 /// This represents one module like 'Parallel Storage Systems'.
 /// Each module has a titel and a list.
@@ -8,16 +8,19 @@ use std::fmt::{Debug, Formatter};
 /// For example, WPF-INF, WPF-TI, etc...
 #[derive(PartialEq, Eq, Clone)]
 pub struct Module {
+    /// The name of the module, eg: Einführung in die Informatik.
     pub title: String,
-    pub usabilities: Vec<ApplicabilityPerCourseOfStudy>,
+    /// Maps a course-of-study to a list of applicabilites
+    /// Could be something like: Verwendbarkeit Bachelor Inf -> Pflicht 1.
+    pub verwendbarkeiten_map: HashMap<String, Verwendbarkeiten>,
+    /// Only applicable in case of LSF modules, eg: Vorlesung, Übung etc
+    pub module_type: Option<String>,
 }
 
 #[derive(PartialEq, Eq, Clone)]
-pub struct ApplicabilityPerCourseOfStudy {
-    /// Could be something like Verwendbarkeit Bachelor Inf
-    pub course_name: String,
+pub struct Verwendbarkeiten {
     /// Could be something like FIN-SMK, WPF-INF, ...
-    pub applicabilites: Vec<String>,
+    pub verwendbarkeiten: Vec<String>,
 }
 
 impl PartialOrd<Self> for Module {
@@ -32,26 +35,8 @@ impl Ord for Module {
     }
 }
 
-// Used to print the results for some sanity checking :)
-impl Debug for Module {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut string = self.title.clone();
-
-        for usability in &self.usabilities {
-            string.push_str(format!("\n{} [", usability.course_name).as_str());
-
-            for module_type in &usability.applicabilites {
-                string.push_str(format!("{module_type}, ").as_str());
-            }
-            string.push(']');
-        }
-
-        writeln!(f, "{string}")
-    }
-}
-
 /*
-impl NextCloudModule {
+impl Module {
     pub fn canonicalize(&mut self) {
         for entry in &mut self.usabilities {
             entry.1.retain(|x| !x.is_empty());

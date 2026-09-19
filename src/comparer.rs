@@ -1,26 +1,23 @@
-use crate::lsf_module::LsfModule;
-use crate::next_cloud_module::Module;
-use difference::{Changeset, Difference};
+use crate::module::Module;
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::iter::zip;
 
 extern crate difference;
 
 pub struct Comparer {
     ground_truth: Vec<Module>,
-    lsf_lies: Vec<LsfModule>,
+    lsf_lies: Vec<Module>,
 }
 
 struct MergedModule {
-    lsf_module: Vec<LsfModule>,
+    lsf_module: Vec<Module>,
     next_cloud_module: Vec<Module>,
 }
 
 impl Comparer {
-    pub fn new(ground_truth: Vec<Module>, lsf_lies: Vec<LsfModule>) -> Self {
+    pub fn new(ground_truth: Vec<Module>, lsf_lies: Vec<Module>) -> Self {
         Self {
             ground_truth,
             lsf_lies,
@@ -28,17 +25,6 @@ impl Comparer {
     }
 
     pub fn compare(&mut self) {
-        /*
-        println!("1. Merge different LSF pages for the same module.");
-        println!(
-            "Any modules that are already inconsistent in the LSF will be ignored going forward."
-        );
-        println!(
-            "Ie. they wont be compared to their next cloud entry for now. This is because it is unclear how to merge the differing lsf entries."
-        );
-        self.lsf_lies = self.merge_lsf_lecture_and_exercise();
-         */
-
         println!("1. Merge LSF and NextCloud ");
         let merged_modules = self.match_lsf_to_nextcloud();
         let next_cloud_only: Vec<_> = merged_modules
@@ -96,81 +82,6 @@ impl Comparer {
     }
 
     // =========================================================
-    // 1. LSF Stuff
-    // =========================================================
-
-    fn merge_lsf_lecture_and_exercise(&self) -> Vec<LsfModule> {
-        let mut result: Vec<LsfModule> = vec![];
-
-        let by_title: HashMap<&str, Vec<&LsfModule>> =
-            self.lsf_lies.iter().into_group_map_by(|m| m.title.as_str());
-
-        for (title, module_list) in by_title {
-            let example = &module_list[0].verwendbarkeiten_pro_studiengang;
-            let all_equal = module_list
-                .iter()
-                .all(|f| &f.verwendbarkeiten_pro_studiengang == example);
-
-            if all_equal {
-                result.push(module_list[0].clone());
-                continue;
-            }
-
-            continue;
-
-            println!("{title}");
-
-            let mut strings = vec![];
-            for module in &module_list {
-                strings.push(module.print_verwendbarkeiten());
-            }
-
-            let example_module = &module_list[0];
-            let example_string = &strings[0];
-
-            println!("{}\n{}", example_module.module_type, example_string);
-
-            for (string, module) in zip(strings.iter().skip(1), module_list.iter().skip(1)) {
-                if !string.eq(example_string) {
-                    println!(
-                        "Diff between {} and {}",
-                        example_module.module_type, module.module_type
-                    );
-                    Self::print_text_diff(example_string, string);
-                }
-            }
-
-            println!();
-        }
-
-        result
-    }
-
-    fn print_text_diff(a: &str, b: &str) {
-        let Changeset { diffs, .. } = Changeset::new(a, b, "\n");
-
-        let mut t = term::stdout().unwrap();
-
-        for i in 0..diffs.len() {
-            match diffs[i] {
-                Difference::Same(ref x) => {
-                    t.reset().unwrap();
-                    writeln!(t, " {}", x);
-                }
-                Difference::Add(ref x) => {
-                    t.fg(term::color::GREEN).unwrap();
-                    writeln!(t, "{}", x);
-                }
-                Difference::Rem(ref x) => {
-                    t.fg(term::color::RED).unwrap();
-                    writeln!(t, "{}", x);
-                }
-            }
-        }
-        t.reset().unwrap();
-    }
-
-    // =========================================================
     // 2. Find LSF - NextCloud Pairs
     // =========================================================
     fn match_lsf_to_nextcloud(&self) -> HashMap<String, MergedModule> {
@@ -215,59 +126,43 @@ impl Comparer {
             if !merged_module.next_cloud_module.is_empty() {
                 typst.push_str("=== NextCloud\n");
             }
-            for next in &merged_module.next_cloud_module {
-                typst.push_str(
-                    "#table(\n
-                columns: (30%, 70%),\t
-                table.header([Studiengang], [Verwendbarkeiten]),",
-                );
-                for usability in next
-                    .usabilities
-                    .iter()
-                    .sorted_by_key(|k| k.course_name.clone())
-                {
-                    if usability.applicabilites.is_empty() {
-                        continue;
-                    }
-                    typst.push_str(&format!("[{}], [", usability.course_name));
-                    for applicability in &usability.applicabilites {
-                        typst.push_str(&format!("{}, ", applicability.replace("@", r"\@")))
-                    }
-                    typst.push_str("],\n");
-                }
-                typst.push_str(")\n");
+            for module in &merged_module.next_cloud_module {
+                Self::module_to_table(typst, module);
             }
 
             if !merged_module.lsf_module.is_empty() {
                 typst.push_str("=== LSF\n");
             }
-            for next in &merged_module.lsf_module {
-                typst.push_str(
-                    "#table(\n
-                columns: (30%, 70%),\t
-                table.header([Studiengang], [Verwendbarkeiten]),",
-                );
-                for (course_name, verwendbarkeiten) in next
-                    .verwendbarkeiten_pro_studiengang
-                    .iter()
-                    .sorted_by_key(|(k, _)| *k)
-                {
-                    if verwendbarkeiten.is_empty() {
-                        continue;
-                    }
-
-                    typst.push_str(&format!("[{}], [", course_name));
-                    for verwendbarkeit in verwendbarkeiten {
-                        let joined = verwendbarkeit.join(" -> ");
-                        let joined = joined.replace("@", r"\@");
-                        typst.push_str(&format!("{}, ", joined))
-                    }
-                    typst.push_str("],\n");
-                }
-                typst.push_str(")\n");
+            for module in &merged_module.lsf_module {
+                Self::module_to_table(typst, module);
             }
 
             typst.push_str("#pagebreak()\n");
         }
+    }
+    
+    fn module_to_table(typst: &mut String, module: &Module) {
+        typst.push_str(
+            "#table(\n
+                columns: (30%, 70%),\t
+                table.header([Studiengang], [Verwendbarkeiten]),",
+        );
+        for (course_name, verwendbarkeiten) in module
+            .verwendbarkeiten_map
+            .iter()
+            .sorted_by_key(|(k, _)| *k)
+        {
+            if verwendbarkeiten.verwendbarkeiten.is_empty() {
+                continue;
+            }
+
+            typst.push_str(&format!("[{}], [", course_name));
+            for verwendbarkeit in &verwendbarkeiten.verwendbarkeiten {
+                let verwendbarkeit = verwendbarkeit.replace("@", r"\@");
+                typst.push_str(&format!("{}, ", verwendbarkeit))
+            }
+            typst.push_str("],\n");
+        }
+        typst.push_str(")\n");       
     }
 }
