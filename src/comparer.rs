@@ -1,8 +1,9 @@
-use crate::module::Module;
+use std::io::Write as IoWrite;
+use std::fmt::Write as FmtWrite;
+use crate::module::{Module, ModuleSource};
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Write;
 
 extern crate difference;
 
@@ -17,24 +18,26 @@ struct MergedModule {
 }
 
 impl Comparer {
-    pub fn new(ground_truth: Vec<Module>, lsf_lies: Vec<Module>) -> Self {
+    pub const fn new(ground_truth: Vec<Module>, lsf_lies: Vec<Module>) -> Self {
         Self {
             ground_truth,
             lsf_lies,
         }
     }
 
-    pub fn compare(&mut self) {
+    pub fn compare(&self) {
         println!("1. Merge LSF and NextCloud ");
         let merged_modules = self.match_lsf_to_nextcloud();
         let next_cloud_only: Vec<_> = merged_modules
             .iter()
             .filter(|(_, module)| module.lsf_module.is_empty())
+            .sorted_by_key(|(title, _)| *title)
             .map(|(_, module)| module)
             .collect();
         let lsf_only: Vec<_> = merged_modules
             .iter()
             .filter(|(_, module)| module.next_cloud_module.is_empty())
+            .sorted_by_key(|(title, _)| *title)
             .map(|(_, module)| module)
             .collect();
         let pairs: Vec<_> = merged_modules
@@ -42,6 +45,7 @@ impl Comparer {
             .filter(|(_, module)| {
                 !module.next_cloud_module.is_empty() && !module.lsf_module.is_empty()
             })
+            .sorted_by_key(|(title, _)| *title)
             .map(|(_, module)| module)
             .collect();
 
@@ -69,16 +73,16 @@ impl Comparer {
         );
 
         typst.push_str("= Pairs\n#pagebreak()\n");
-        self.output_as_typst_pdf(&mut typst, pairs);
+        Self::output_as_typst_pdf(&mut typst, pairs);
 
         typst.push_str("= LSF only\n#pagebreak()\n");
-        self.output_as_typst_pdf(&mut typst, lsf_only);
+        Self::output_as_typst_pdf(&mut typst, lsf_only);
 
         typst.push_str("= NextCloud only\n#pagebreak()\n");
-        self.output_as_typst_pdf(&mut typst, next_cloud_only);
+        Self::output_as_typst_pdf(&mut typst, next_cloud_only);
 
         let mut output = File::create("./lsf_vs_bookstack.typ").unwrap();
-        write!(output, "{}", typst).unwrap();
+        write!(output, "{typst}").unwrap();
     }
 
     // =========================================================
@@ -88,17 +92,15 @@ impl Comparer {
         let mut map = HashMap::new();
 
         for lsf_module in &self.lsf_lies {
-            let entry = map
-                .entry(lsf_module.title.to_owned())
-                .or_insert(MergedModule {
-                    lsf_module: vec![],
-                    next_cloud_module: vec![],
-                });
+            let entry = map.entry(lsf_module.title.clone()).or_insert(MergedModule {
+                lsf_module: vec![],
+                next_cloud_module: vec![],
+            });
             entry.lsf_module.push(lsf_module.clone());
         }
 
         for module in &self.ground_truth {
-            let entry = map.entry(module.title.to_owned()).or_insert(MergedModule {
+            let entry = map.entry(module.title.clone()).or_insert(MergedModule {
                 lsf_module: vec![],
                 next_cloud_module: vec![],
             });
@@ -110,59 +112,61 @@ impl Comparer {
 
     // =========================================================
     // 3. Output to Typst
-    // TODO: Add canonical course of study and sort by that?
-    // TODO: Add output for non-pairs, for lsf-mistakes and maybe an overview to catch non-matched errors?
+    // TODO: Add Lukases comparisions
+    // TODO: Add table comparing lsf vs next cloud singles
     // =========================================================
-    fn output_as_typst_pdf(&self, typst: &mut String, merged_modules: Vec<&MergedModule>) {
+    fn output_as_typst_pdf(typst: &mut String, merged_modules: Vec<&MergedModule>) {
         for merged_module in merged_modules {
-            let title = match merged_module.lsf_module.get(0) {
-                None => merged_module.next_cloud_module[0].title.clone(),
-                Some(lsf_module) => lsf_module.title.clone(),
-            };
+            let title = merged_module.lsf_module.first().map_or_else(
+                || merged_module.next_cloud_module[0].title.clone(),
+                |lsf_module| lsf_module.title.clone(),
+            );
+
             let title = title.replace('@', "\\@");
 
-            typst.push_str(&format!("== {}\n", title));
+            let _ = writeln!(typst, "== {title}");
 
             if !merged_module.next_cloud_module.is_empty() {
                 typst.push_str("=== NextCloud\n");
             }
             for module in &merged_module.next_cloud_module {
-                Self::module_to_table(typst, module);
+                Self::module_to_table(typst, module, &ModuleSource::Bs);
             }
 
             if !merged_module.lsf_module.is_empty() {
                 typst.push_str("=== LSF\n");
             }
             for module in &merged_module.lsf_module {
-                Self::module_to_table(typst, module);
+                Self::module_to_table(typst, module, &ModuleSource::Lsf);
             }
 
             typst.push_str("#pagebreak()\n");
         }
     }
-    
-    fn module_to_table(typst: &mut String, module: &Module) {
-        typst.push_str(
-            "#table(\n
-                columns: (30%, 70%),\t
-                table.header([Studiengang], [Verwendbarkeiten]),",
-        );
-        for (course_name, verwendbarkeiten) in module
-            .verwendbarkeiten_map
-            .iter()
-            .sorted_by_key(|(k, _)| *k)
+
+    fn module_to_table(typst: &mut String, module: &Module, module_source: &ModuleSource) {
+        typst.push_str("#table(columns: (10%, 30%, 60%), table.header([\\#], [Studiengang], [Verwendbarkeiten]),\n");
+        for (studiengang, verwendbarkeiten) in
+            module
+                .verwendbarkeiten_map
+                .iter()
+                .sorted_by_key(|(studiengang, _)| {
+                    Module::canonicalize_field_of_study(studiengang, module_source)
+                })
         {
-            if verwendbarkeiten.verwendbarkeiten.is_empty() {
+            if verwendbarkeiten.list.is_empty() {
                 continue;
             }
 
-            typst.push_str(&format!("[{}], [", course_name));
-            for verwendbarkeit in &verwendbarkeiten.verwendbarkeiten {
-                let verwendbarkeit = verwendbarkeit.replace("@", r"\@");
-                typst.push_str(&format!("{}, ", verwendbarkeit))
+
+            let _ = write!(typst, "[{}], ", Module::canonicalize_field_of_study(studiengang, module_source));
+            let _ = write!(typst, "[{studiengang}], [");
+            for verwendbarkeit in &verwendbarkeiten.list {
+                let verwendbarkeit = verwendbarkeit.replace('@', r"\@");
+                let _ = write!(typst, "{verwendbarkeit}, ");
             }
             typst.push_str("],\n");
         }
-        typst.push_str(")\n");       
+        typst.push_str(")\n");
     }
 }

@@ -14,18 +14,23 @@ pub struct Module {
     /// Could be something like: Verwendbarkeit Bachelor Inf -> Pflicht 1.
     pub verwendbarkeiten_map: HashMap<String, Verwendbarkeiten>,
     /// Only applicable in case of LSF modules, eg: Vorlesung, Übung etc
-    pub module_type: Option<String>,
+    pub mtype: Option<String>,
 }
 
 #[derive(PartialEq, Eq, Clone)]
 pub struct Verwendbarkeiten {
     /// Could be something like FIN-SMK, WPF-INF, ...
-    pub verwendbarkeiten: Vec<String>,
+    pub list: Vec<String>,
+}
+
+pub enum ModuleSource {
+    Lsf,
+    Bs,
 }
 
 impl PartialOrd<Self> for Module {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.title.partial_cmp(&other.title)
+        Some(self.cmp(other))
     }
 }
 
@@ -35,28 +40,29 @@ impl Ord for Module {
     }
 }
 
-/*
 impl Module {
-    pub fn canonicalize(&mut self) {
-        for entry in &mut self.usabilities {
-            entry.1.retain(|x| !x.is_empty());
+    pub fn canonicalize_field_of_study(
+        field_of_study: &str,
+        module_source: &ModuleSource,
+    ) -> String {
+        match module_source {
+            ModuleSource::Lsf => Self::canonicalize_lsf_field_of_study(field_of_study),
+            ModuleSource::Bs => Self::canonicalize_bs_field_of_study(field_of_study),
         }
-
-        self.usabilities.retain(|x| !x.1.is_empty());
-
-        for (field_of_study, options) in &mut self.usabilities {
-            let index = field_of_study.find(".Sc.").unwrap();
-            let degree = &field_of_study[index - 1..index];
-
-            let field = &field_of_study[index + 4..field_of_study.len()];
-
-            *field_of_study = format!("{:<10} {:<15}", degree.trim(), field.trim());
-        }
-
-        self.usabilities.sort();
     }
 
-    fn canonicalize_lsf(field_of_study: &mut String) {
+    fn canonicalize_bs_field_of_study(field_of_study: &str) -> String {
+        // Turns this: Verwendbarkeit B.Sc. WIF
+        // Into this: B | WIF
+        let index = field_of_study.find(".Sc.").unwrap();
+        let degree = &field_of_study[index - 1..index];
+
+        let field = &field_of_study[index + 4..field_of_study.len()];
+
+        format!("{:<10} | {:<15}", degree.trim(), field.trim())
+    }
+
+    fn canonicalize_lsf_field_of_study(field_of_study: &str) -> String {
         // Turn this: Wirtschaftsinformatik - Bachelor (WIF; B):
         // Into this: B | WIF
         let start = field_of_study.find('(').unwrap();
@@ -65,11 +71,10 @@ impl Module {
 
         let (bracketed_field_of_study, degree) = bracketed.split_once(';').unwrap();
 
-        *field_of_study = format!(
-            "{:<10} {:<15}",
+        format!(
+            "{:<10} | {:<15}",
             degree.trim(),
             bracketed_field_of_study.trim()
-        );
+        )
     }
 }
- */

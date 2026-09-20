@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
     let lsf_lies = lsf_export_reader.get_lsf_lies()?;
 
     // 4. Compare
-    let mut comparer = Comparer::new(ground_truth, lsf_lies);
+    let comparer = Comparer::new(ground_truth, lsf_lies);
     comparer.compare();
 
     Ok(())

@@ -1,10 +1,10 @@
+use crate::module::{Module, Verwendbarkeiten};
 use anyhow::bail;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fmt::{Debug, Formatter};
 use std::fs;
-use crate::module::{Module, Verwendbarkeiten};
 
 pub struct LsfXmlReader {
     xml: String,
@@ -83,7 +83,7 @@ impl Debug for TreeNode {
             str.push('\t');
         }
 
-        let _ = write!(str, "{:?} - {:?}\n", self.depths, self.content);
+        let _ = writeln!(str, "{:?} - {:?}", self.depths, self.content);
 
         for child in &self.children {
             let _ = write!(str, "{child:?}");
@@ -196,7 +196,7 @@ impl LsfXmlReader {
             Self::traverse_study_course_tree(
                 class_to_module,
                 course_of_study,
-                &node,
+                node,
                 verwendbarkeit_stack,
             );
             let _ = verwendbarkeit_stack.pop();
@@ -205,18 +205,19 @@ impl LsfXmlReader {
         // Then, go over the list of classes applicable for the current node.
         for class in &current_node.content.classes {
             // Either get or create the module.
-            let module = class_to_module.entry(class.clone()).or_insert(Module {
+            let module = Module {
                 title: class.title.clone(),
                 verwendbarkeiten_map: HashMap::new(),
-                module_type: Some(class.class_type.clone()),
-            });
+                mtype: Some(class.class_type.clone()),
+            };
+            let module = class_to_module.entry(class.clone()).or_insert(module);
 
             // If this is the first time we are encountering this course of study for this class, create it.
             let verwendbarkeiten = module
                 .verwendbarkeiten_map
                 .entry(course_of_study.to_string())
-                .or_insert(Verwendbarkeiten {verwendbarkeiten: vec![]});
-            verwendbarkeiten.verwendbarkeiten.push(verwendbarkeit_stack.join(" → "));
+                .or_insert(Verwendbarkeiten { list: vec![] });
+            verwendbarkeiten.list.push(verwendbarkeit_stack.join(" → "));
         }
     }
 }
