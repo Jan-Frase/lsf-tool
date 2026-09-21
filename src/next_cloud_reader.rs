@@ -1,4 +1,4 @@
-use crate::module::{Module, Verwendbarkeiten};
+use crate::module::{Module, ModuleSource, Studiengang, Verwendbarkeiten};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -391,9 +391,12 @@ impl NextCloudReader {
             list: applicable_module_type_names,
         };
 
-        module
-            .verwendbarkeiten_map
-            .insert(column.title.clone(), applics);
+        if !applics.list.is_empty() {
+            module
+                .verwendbarkeiten_map
+                .insert(Studiengang::new(column.title.clone(), &ModuleSource::Bs), applics);
+
+        }
 
         Ok(())
     }

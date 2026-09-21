@@ -12,9 +12,22 @@ pub struct Module {
     pub title: String,
     /// Maps a course-of-study to a list of applicabilites
     /// Could be something like: Verwendbarkeit Bachelor Inf -> Pflicht 1.
-    pub verwendbarkeiten_map: HashMap<String, Verwendbarkeiten>,
+    pub verwendbarkeiten_map: HashMap<Studiengang, Verwendbarkeiten>,
     /// Only applicable in case of LSF modules, eg: Vorlesung, Übung etc
     pub mtype: Option<String>,
+}
+
+#[derive(PartialEq, Eq, Clone, Hash)]
+pub struct Studiengang {
+    pub name: String,
+    pub shortened: String,
+}
+
+impl Studiengang {
+    pub fn new(name: String, module_source: &ModuleSource) -> Self {
+        let shortened = Self::canonicalize_field_of_study(&name, module_source);
+        Self { name, shortened }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone)]
@@ -40,8 +53,8 @@ impl Ord for Module {
     }
 }
 
-impl Module {
-    pub fn canonicalize_field_of_study(
+impl Studiengang {
+    fn canonicalize_field_of_study(
         field_of_study: &str,
         module_source: &ModuleSource,
     ) -> String {
@@ -59,7 +72,7 @@ impl Module {
 
         let field = &field_of_study[index + 4..field_of_study.len()];
 
-        format!("{:<10} | {:<15}", degree.trim(), field.trim())
+        format!("{:<10} | {:<15}", degree.trim(), field.trim()).to_uppercase()
     }
 
     fn canonicalize_lsf_field_of_study(field_of_study: &str) -> String {
@@ -75,6 +88,6 @@ impl Module {
             "{:<10} | {:<15}",
             degree.trim(),
             bracketed_field_of_study.trim()
-        )
+        ).to_uppercase()
     }
 }

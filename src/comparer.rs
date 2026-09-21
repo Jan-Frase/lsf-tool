@@ -1,9 +1,10 @@
 use std::io::Write as IoWrite;
 use std::fmt::Write as FmtWrite;
-use crate::module::{Module, ModuleSource};
-use itertools::Itertools;
-use std::collections::HashMap;
+use crate::module::{Module, ModuleSource, Verwendbarkeiten};
+use itertools::{chain, enumerate, Itertools};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::iter::zip;
 
 extern crate difference;
 
@@ -15,6 +16,10 @@ pub struct Comparer {
 struct MergedModule {
     lsf_module: Vec<Module>,
     next_cloud_module: Vec<Module>,
+}
+
+struct ModuleComparison {
+    studiengang_to_verwendbarkeiten: HashMap<String, HashSet<String>>,
 }
 
 impl Comparer {
@@ -55,9 +60,6 @@ impl Comparer {
             #outline(depth: 2)
             #show table.cell.where(y: 0): strong
             #set table(
-              fill: (_, y) => if calc.odd(y) { rgb(\"EAF2F5\") },
-            )
-            #set table(
               stroke: (x, y) => if y == 0 {
                 (top: 1pt, bottom: 0.7pt)
               } else if y > 1 {
@@ -67,6 +69,16 @@ impl Comparer {
                 if x > 0 { left }
                 else { left }
               ),
+              fill: (_, y) => if calc.odd(y) { rgb(\"#B0CED9\") },
+            )
+
+            #let status(ok) = box(
+              fill: if ok { rgb(\"#d4edda\") } else { rgb(\"#f8d7da\") },
+              inset: 4pt,
+              radius: 3pt,
+              text(fill: if ok { rgb(\"#155724\") } else { rgb(\"#721c24\") }, weight: \"bold\")[
+                #if ok { text(fill: green, size: 1em)[✔] } else { text(fill: red,   size: 1.2em)[✘] }
+              ],
             )
             #pagebreak()
             \n",
@@ -140,6 +152,11 @@ impl Comparer {
                 Self::module_to_table(typst, module, &ModuleSource::Lsf);
             }
 
+            if !merged_module.next_cloud_module.is_empty() && !merged_module.lsf_module.is_empty() {
+                typst.push_str("=== Comparision\n");
+                Self::output_comparision_table(typst, merged_module);
+            }
+
             typst.push_str("#pagebreak()\n");
         }
     }
@@ -151,16 +168,15 @@ impl Comparer {
                 .verwendbarkeiten_map
                 .iter()
                 .sorted_by_key(|(studiengang, _)| {
-                    Module::canonicalize_field_of_study(studiengang, module_source)
+                    studiengang.shortened.clone()
                 })
         {
             if verwendbarkeiten.list.is_empty() {
                 continue;
             }
 
-
-            let _ = write!(typst, "[{}], ", Module::canonicalize_field_of_study(studiengang, module_source));
-            let _ = write!(typst, "[{studiengang}], [");
+            let _ = write!(typst, "[{}], ", studiengang.shortened);
+            let _ = write!(typst, "[{}], [", studiengang.name);
             for verwendbarkeit in &verwendbarkeiten.list {
                 let verwendbarkeit = verwendbarkeit.replace('@', r"\@");
                 let _ = write!(typst, "{verwendbarkeit}, ");
@@ -168,5 +184,78 @@ impl Comparer {
             typst.push_str("],\n");
         }
         typst.push_str(")\n");
+    }
+
+    fn output_comparision_table(typst: &mut String, merged_module: &MergedModule) {
+        let mut comparison = ModuleComparison {
+            studiengang_to_verwendbarkeiten: HashMap::new(),
+        };
+
+        // Fill map with all "studiengänge" and its matching "verwendbarkeiten"
+        for module in chain(merged_module.lsf_module.clone(), merged_module.next_cloud_module.clone()) {
+            for (studiengang, verwendbarkeit) in &module.verwendbarkeiten_map {
+                let _ = comparison
+                    .studiengang_to_verwendbarkeiten
+                    .entry(studiengang.shortened.clone())
+                    .or_insert_with(HashSet::new)
+                    .extend(verwendbarkeit.list.clone());
+            }
+        }
+
+        // write header
+        let total_modules = merged_module.lsf_module.len() + merged_module.next_cloud_module.len();
+        let _ = writeln!(typst, "#table(columns: {}, table.header([\\#], [Verwendbarkeit],", 2 + total_modules);
+        // TODO: Update to include module type?
+        for (index, next_cloud_module) in enumerate(merged_module.next_cloud_module.iter()) {
+            let _ = write!(typst, "[NextCloud-{}], ", index);
+        }
+        for (index, lsf_module) in enumerate(merged_module.lsf_module.iter()) {
+            let _ = write!(typst, "[LSF-{}], ", index);
+        }
+        let _ = writeln!(typst, "),");
+
+        // write rows
+        for (studiengang, verwendbarkeiten) in comparison.studiengang_to_verwendbarkeiten.iter() {
+            if verwendbarkeiten.is_empty() {
+                continue;
+            }
+            let _ = write!(typst, "[{}], ", studiengang);
+            for (index, verwendbarkeit) in verwendbarkeiten.iter().enumerate() {
+                let _ = write!(typst, "[{}], ", verwendbarkeit.replace('@', r"\@"));
+                /*
+                for _ in 0..total_modules {
+                    let _ = write!(typst, "[X],");
+                }
+                 */
+                Self::check_for_match(typst, studiengang, verwendbarkeit, merged_module);
+                // only print this if there are more verwendbarkeiten
+                if index < verwendbarkeiten.len() - 1 {
+                    let _ = write!(typst, "\n[],");
+                }
+            }
+        }
+        let _ = writeln!(typst, ")\n");
+    }
+
+    fn check_for_match(typst: &mut String, shortened: &String, verwendbarkeit: &String, merged_module: &MergedModule) {
+        for next_cloud_module in &merged_module.next_cloud_module {
+            Self::check_per_module(typst, shortened, verwendbarkeit, next_cloud_module);
+        }
+        for lsf_module in &merged_module.lsf_module {
+            Self::check_per_module(typst, shortened, verwendbarkeit, lsf_module);
+        }
+    }
+
+    fn check_per_module(typst: &mut String, shortened: &String, verwendbarkeit: &String, module: &Module) {
+        let module_verwend = module.verwendbarkeiten_map.iter().find(|(stud, _)| stud.shortened.eq(shortened)).map(|(_, v)| { v });
+        let matches = match module_verwend {
+            None => false,
+            Some(list) => list.list.contains(verwendbarkeit),
+        };
+        if matches {
+            let _ = write!(typst, "[#status(true)],");
+        } else {
+            let _ = write!(typst, "[#status(false)],");
+        }
     }
 }

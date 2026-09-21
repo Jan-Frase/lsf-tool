@@ -1,4 +1,4 @@
-use crate::module::{Module, Verwendbarkeiten};
+use crate::module::{Module, ModuleSource, Studiengang, Verwendbarkeiten};
 use anyhow::bail;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -215,9 +215,11 @@ impl LsfXmlReader {
             // If this is the first time we are encountering this course of study for this class, create it.
             let verwendbarkeiten = module
                 .verwendbarkeiten_map
-                .entry(course_of_study.to_string())
+                .entry(Studiengang::new(course_of_study.to_string(), &ModuleSource::Lsf))
                 .or_insert(Verwendbarkeiten { list: vec![] });
-            verwendbarkeiten.list.push(verwendbarkeit_stack.join(" → "));
+            if !verwendbarkeit_stack.is_empty() {
+                verwendbarkeiten.list.push(verwendbarkeit_stack.join(" → "));
+            }
         }
     }
 }
